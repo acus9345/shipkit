@@ -2,12 +2,15 @@
 //! PyPI can be added as new implementations without touching the steps.
 
 pub mod crates_io;
+pub mod npm;
+pub mod pypi;
+pub mod workflows;
 
 use crate::error::{Code, Result, ShipError};
 use crate::log::Logger;
 use crate::proc::Cmd;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Local, offline view of the registry login. Never contains a secret.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -124,41 +127,55 @@ pub trait Registry {
     fn gitignore(&self) -> &'static str;
     /// Markdown for the README's install section.
     fn install_doc(&self, p: &NewProject) -> String;
+    /// Markdown for the README's usage section (code blocks included).
+    fn usage_doc(&self, p: &NewProject) -> String;
+
+    /// Tools `preflight` checks, as (name, version command).
+    fn tool_checks(&self) -> Vec<(&'static str, Cmd)> {
+        vec![(self.cli(), Cmd::new(self.cli(), &["--version"]))]
+    }
+    /// The public URL `check-names` queries, for plans.
+    fn name_lookup_url(&self, name: &str) -> String;
 
     /// Lint, typecheck, build and test commands, in order.
     fn checks(&self, dir: &Path) -> Vec<(&'static str, Cmd)>;
-    /// Command that lists the files a publish would upload.
-    fn package_list_cmd(&self, dir: &Path) -> Cmd;
-    /// Parse the output of [`Registry::package_list_cmd`].
-    fn parse_package_list(&self, stdout: &str) -> Vec<String>;
+    /// Commands `package_files` runs, for plans.
+    fn package_files_plan(&self, dir: &Path) -> Vec<Cmd>;
+    /// The files a publish would upload, relative to `dir`.
+    fn package_files(&self, dir: &Path, log: &Logger) -> Result<Vec<String>>;
     /// Files the registry tool adds itself; not flagged as junk.
     fn generated_package_files(&self) -> &'static [&'static str];
-    /// The registry's own publish dry run.
-    fn dry_run_cmd(&self, dir: &Path) -> Cmd;
+    /// The registry's own publish dry run, run in order.
+    fn dry_run_cmds(&self, dir: &Path) -> Vec<Cmd>;
+    /// Temporary build folders the dry run or publish commands create, removed afterwards.
+    fn scratch_dirs(&self, _dir: &Path, _version: &str) -> Vec<std::path::PathBuf> {
+        Vec::new()
+    }
 
     /// Files to rewrite so the project's version becomes `new`, as
     /// (relative path, full new content). Nothing is written here.
     fn set_version(&self, dir: &Path, info: &ProjectInfo, new: &str) -> Result<Vec<(String, String)>>;
-    /// Values connecting `owner/repo`'s `workflow` to the package without stored tokens.
-    fn trusted_publishing(&self, package: &str, owner: &str, repo: &str, workflow: &str) -> TrustedPublishing;
+    /// Values connecting `owner/repo`'s `workflow` to the package without stored
+    /// tokens. `exists` says whether the package is already on the registry.
+    fn trusted_publishing(&self, package: &str, owner: &str, repo: &str, workflow: &str, exists: bool) -> TrustedPublishing;
 
     /// Publish from the terminal with the existing login (never a pasted token).
-    fn publish_cmd(&self, dir: &Path, allow_dirty: bool) -> Cmd;
+    fn publish_cmds(&self, dir: &Path, version: &str, allow_dirty: bool) -> Vec<Cmd>;
     /// Whether publish output means the registry rate-limited us (HTTP 429).
     fn is_rate_limited(&self, output: &str) -> bool;
     /// Public page of one version.
     fn package_url(&self, name: &str, version: &str) -> String;
-    /// Install `name@version` from the real registry into `root`.
-    fn install_cmd(&self, name: &str, version: &str, root: &Path) -> Cmd;
-    /// Where [`Registry::install_cmd`] puts executable `bin`.
-    fn installed_bin(&self, root: &Path, bin: &str) -> PathBuf;
+    /// Install `name@version` from the real registry into the empty folder `root`.
+    fn install_cmds(&self, name: &str, version: &str, root: &Path) -> Vec<Cmd>;
+    /// Command that runs executable `bin` after [`Registry::install_cmds`].
+    fn installed_bin_cmd(&self, root: &Path, bin: &str) -> Cmd;
     /// Commands, run in order inside the empty folder `dir`, proving a library
-    /// version resolves and builds as a dependency.
+    /// version resolves and loads as a dependency.
     fn library_smoke(&self, name: &str, version: &str, dir: &Path) -> Vec<Cmd>;
-    /// Release build of a source checkout.
-    fn build_release_cmd(&self, dir: &Path) -> Cmd;
-    /// Where [`Registry::build_release_cmd`] puts executable `bin`.
-    fn built_bin(&self, dir: &Path, bin: &str) -> PathBuf;
+    /// Build a fresh source checkout so its executable can run.
+    fn build_release_cmds(&self, dir: &Path) -> Vec<Cmd>;
+    /// Command that runs executable `bin` after [`Registry::build_release_cmds`].
+    fn built_bin_cmd(&self, dir: &Path, bin: &str) -> Cmd;
 
     fn ci_workflow(&self, w: &WorkflowSpec) -> String;
     fn release_workflow(&self, w: &WorkflowSpec) -> String;
@@ -167,9 +184,11 @@ pub trait Registry {
 pub fn by_id(id: &str) -> Result<Box<dyn Registry>> {
     match id.to_ascii_lowercase().as_str() {
         "crates.io" | "crates-io" | "cratesio" | "cargo" | "rust" => Ok(Box::new(crates_io::CratesIo)),
+        "npm" | "npmjs" | "node" | "javascript" | "js" => Ok(Box::new(npm::Npm)),
+        "pypi" | "python" | "pip" | "uv" => Ok(Box::new(pypi::PyPi)),
         other => Err(ShipError::new(
             Code::Input,
-            format!("unknown registry `{other}`; supported: crates.io"),
+            format!("unknown registry `{other}`; supported: crates.io, npm, pypi"),
         )),
     }
 }
@@ -179,7 +198,7 @@ pub fn resolve(explicit: Option<&str>, dir: &Path) -> Result<Box<dyn Registry>> 
     if let Some(id) = explicit {
         return by_id(id);
     }
-    let all: Vec<Box<dyn Registry>> = vec![Box::new(crates_io::CratesIo)];
+    let all: Vec<Box<dyn Registry>> = vec![Box::new(crates_io::CratesIo), Box::new(npm::Npm), Box::new(pypi::PyPi)];
     let mut found = all.into_iter().filter(|r| dir.join(r.manifest()).is_file());
     Ok(found.next().unwrap_or_else(|| Box::new(crates_io::CratesIo)))
 }
@@ -206,7 +225,9 @@ mod tests {
         for id in ["crates.io", "crates-io", "Cargo"] {
             assert_eq!(by_id(id).unwrap().id(), "crates.io");
         }
-        assert_eq!(by_id("npm").err().unwrap().code, Code::Input);
+        assert_eq!(by_id("npm").unwrap().id(), "npm");
+        assert_eq!(by_id("Python").unwrap().id(), "pypi");
+        assert_eq!(by_id("maven").err().unwrap().code, Code::Input);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! File templates for Rust projects. Placeholders are `@@NAME@@` so they never
 //! clash with GitHub Actions' `${{ }}` syntax.
 
-use crate::registry::{NewProject, Target, WorkflowSpec, RELEASE_MARKER};
+use crate::registry::{workflows, NewProject, Target, WorkflowSpec, RELEASE_MARKER};
 
 fn fill(template: &str, vars: &[(&str, &str)]) -> String {
     let mut s = template.to_string();
@@ -177,7 +177,7 @@ jobs:
 
 pub fn release_workflow(w: &WorkflowSpec) -> String {
     let mut needs = vec!["test"];
-    let mut jobs = String::new();
+    let mut jobs = fill(TEST_JOB, &[("NAME", &w.name)]);
     if let Some(bin) = &w.bin {
         needs.push("build");
         let matrix = if w.private {
@@ -191,39 +191,14 @@ pub fn release_workflow(w: &WorkflowSpec) -> String {
         needs.push("publish");
         jobs.push_str(&fill(PUBLISH_JOB, &[("NAME", &w.name)]));
     }
-    let (download, assets, upload) = if w.bin.is_some() {
-        (DOWNLOAD_STEP, " dist/*", UPLOAD_EXISTING)
-    } else {
-        ("", "", "")
-    };
-    fill(
-        RELEASE,
-        &[
-            ("MARKER", RELEASE_MARKER),
-            ("NAME", &w.name),
-            ("JOBS", &jobs),
-            ("NEEDS", &needs.join(", ")),
-            ("DOWNLOAD", download),
-            ("ASSETS", assets),
-            ("UPLOAD", upload),
-        ],
-    )
+    let header = workflows::release_header(
+        RELEASE_MARKER,
+        "On a v* tag: test, build, publish via trusted publishing (no stored token),\n# then create the GitHub release from CHANGELOG.md.",
+    );
+    header + &jobs + &workflows::github_release_job(&needs, w.bin.is_some().then_some("dist-*"))
 }
 
-const RELEASE: &str = r#"@@MARKER@@
-# On a v* tag: test, build, publish via trusted publishing (no stored token),
-# then create the GitHub release from CHANGELOG.md.
-name: Release
-
-on:
-  push:
-    tags: ['v*']
-
-permissions:
-  contents: read
-
-jobs:
-  test:
+const TEST_JOB: &str = r#"  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -241,33 +216,6 @@ jobs:
           fi
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
-@@JOBS@@
-  github-release:
-    needs: [@@NEEDS@@]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-@@DOWNLOAD@@      - name: Release notes from CHANGELOG.md
-        shell: bash
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          awk -v v="$version" '
-            /^## \[/ { if (found) exit; if (index($0, "[" v "]")) { found = 1; next } }
-            found { print }
-          ' CHANGELOG.md > notes.md
-          [ -s notes.md ] || echo "Release $GITHUB_REF_NAME" > notes.md
-      - name: Create the GitHub release (never modifies an existing one)
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
-            echo "Release $GITHUB_REF_NAME already exists."
-@@UPLOAD@@          else
-            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md@@ASSETS@@
-          fi
 "#;
 
 const BUILD_JOB: &str = r#"
@@ -341,19 +289,6 @@ const PUBLISH_JOB: &str = r#"
         run: cargo publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-"#;
-
-const DOWNLOAD_STEP: &str = r#"      - uses: actions/download-artifact@v8
-        with:
-          pattern: dist-*
-          path: dist
-          merge-multiple: true
-"#;
-
-const UPLOAD_EXISTING: &str = r#"            # Attach any missing binaries; existing assets are never replaced.
-            for f in dist/*; do
-              gh release upload "$GITHUB_REF_NAME" "$f" || echo "$f is already attached; left unchanged."
-            done
 "#;
 
 #[cfg(test)]

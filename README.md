@@ -1,6 +1,6 @@
 # shipkit
 
-Take a project from a local folder to a public GitHub repo and a crates.io release, safely.
+Take a project from a local folder to a public GitHub repo and a crates.io, npm or PyPI release, safely.
 
 `ship` is one small CLI. It runs every step of the release as a separate command that prints one
 JSON object, so Claude Code (or a script, or you) can drive it one step at a time. The Claude Code
@@ -9,13 +9,13 @@ say yes, and a `/ship-setup` command. There is no MCP server.
 
 - **Safe by default.** Creating a repo, tagging a release and publishing are refused without
   `--confirm`. Every step has a `--dry-run` that prints exactly what it would run.
-- **No tokens.** `ship` uses your existing `gh` and `cargo` logins. Generated release workflows
-  publish with crates.io trusted publishing (OIDC), so the repo stores no secrets.
+- **No tokens.** `ship` uses your existing `gh`, `cargo`, `npm` or `uv` logins. Generated release
+  workflows publish with trusted publishing (OIDC), so the repo stores no secrets.
 - **Never overwrites.** `scaffold` and `add-workflows` only create missing files. Tags are never
   moved or deleted. Running any step twice is safe.
 - **Checks before anything leaves your machine.** A secret scan and the registry dry run must pass
   before a commit, repo creation, release or publish.
-- **No telemetry.** The only network calls are the ones a step needs (GitHub, crates.io). Every
+- **No telemetry.** The only network calls are the ones a step needs (GitHub and the registry). Every
   action is logged locally, with secrets redacted.
 
 ## Install
@@ -38,8 +38,23 @@ ship --help
 ship self-test
 ```
 
-`ship` needs `git`, the GitHub CLI `gh` (logged in with `gh auth login`) and `cargo`.
-`ship preflight` checks all of them and never starts a login itself.
+`ship` needs `git` and the GitHub CLI `gh` (logged in with `gh auth login`), plus the tool for
+your registry. `ship preflight` checks all of them and never starts a login itself.
+
+## Registries
+
+The registry is detected from the manifest (`Cargo.toml`, `package.json` or `pyproject.toml`).
+For a new project, pass `--registry crates.io|npm|pypi` to `scaffold`.
+
+| Registry | Tool | Checks | Dry run | Trusted publishing |
+|---|---|---|---|---|
+| crates.io | `cargo` | clippy, build, test | `cargo publish --dry-run` | Needs the crate to exist: publish the first version with `ship publish`. |
+| npm | `node`, `npm` | install, `lint`/`typecheck`/`build`/`test` scripts if present | `npm publish --dry-run` | Needs the package to exist: publish the first version with `ship publish`. |
+| PyPI | `uv` | compile, `uv build`, unittest | `uv build` + `uv publish --dry-run` | Works before the first release (pending publisher), so CI can publish 0.1.0. |
+
+Repo-only projects block publishing the registry's own way: `publish = false` in `Cargo.toml`,
+`"private": true` in `package.json`, or the `Private :: Do Not Upload` classifier in
+`pyproject.toml`.
 
 ### Claude Code plugin
 
@@ -52,9 +67,9 @@ ship self-test
 `/ship-setup` runs `ship preflight` and `ship self-test` and offers the recommended permission
 rules from [docs/permissions.md](docs/permissions.md). With those rules, Claude runs the local
 steps without asking, asks you before `create-repo`, `release` and `publish`, and can't run raw
-`cargo publish` or force-push.
+`cargo publish`, `npm publish` or force-push.
 
-Then ask Claude something like *"ship this project to GitHub and crates.io"*.
+Then ask Claude something like *"ship this project to GitHub and crates.io"* (or npm, or PyPI).
 
 ## Steps
 
@@ -62,24 +77,26 @@ Run them in order. Each one stops at the first problem and explains it.
 
 | Step | Risk | What it does |
 |---|---|---|
-| `preflight` | low | Are git, gh and cargo installed? Which accounts are logged in? What is the git identity? Run this first. |
-| `check-names` | low | Is the package name valid and free on crates.io, and is the repo name free on GitHub? Suggests the best free alternative if not. |
+| `preflight` | low | Are git, gh and the registry's tools installed? Which accounts are logged in? What is the git identity? Run this first. |
+| `check-names` | low | Is the package name valid and free on the registry, and is the repo name free on GitHub? Suggests the best free alternative if not. |
 | `scaffold` | medium | Creates a standard project: sources, tests, README, LICENSE, CHANGELOG, `.gitignore`, `.gitattributes`, and a manifest at 0.1.0 with your git identity. `--cli` adds `--help`/`--version`. `--target repo` blocks publishing. `--repo-url` adds workflows. `--private` runs CI on Ubuntu only. |
 | `scan-secrets` | low | Finds `.env` files, private keys and tokens in everything that would be committed. Reports file and line, never the secret. |
-| `checks` | low | `cargo clippy`, `cargo build`, `cargo test`; stops at the first failure and returns its output. |
-| `inspect` | low | `cargo publish --dry-run`, the list of files that would be published, and any junk or secrets among them. |
+| `checks` | low | The registry's lint, typecheck, build and test steps (see Registries); stops at the first failure and returns its output. |
+| `inspect` | low | The registry's publish dry run, the list of files that would be published, and any junk or secrets among them. |
 | `commit` | medium | `git init` on `main` if needed, refuses if secrets or `.env` files would be committed, then commits. |
 | `create-repo` | **high** | Creates the GitHub repo (public unless `--private`) and pushes, or just pushes if it is already `origin`. `--topics` adds topics. |
 | `add-workflows` | medium | `ci.yml` (lint, build, test on push and PR) and `release.yml` (on `v*` tags: test, build, publish by trusted publishing unless the version exists, GitHub release from the CHANGELOG with the binaries attached). |
-| `trusted-publishing` | medium | Opens the crates.io settings page and prints the exact values to enter. You click Save. |
+| `trusted-publishing` | medium | Opens the registry's trusted-publishing settings page and prints the exact values to enter. You click Save. |
 | `bump` | medium | Bumps the version (patch/minor/major) and records it in the CHANGELOG from `--notes` or the Unreleased section. Does not commit. |
 | `release` | **high** | Tags `v<version>`, pushes the branch and the tag, and creates the GitHub release unless `release.yml` does. |
 | `watch` | low | Waits up to about 45 s for the workflow runs of the current commit; on failure, returns the failing log. Call it again while runs are in progress. |
-| `verify` | medium | In a fresh temp folder, installs the package from crates.io (or clones the repo) and runs the README's commands one at a time. |
-| `publish` | **high** | `cargo publish` from your terminal; skipped if the version exists. After a rate limit (HTTP 429) it refuses to retry for 24 hours unless `--force`. |
+| `verify` | medium | In a fresh temp folder, installs the package from the real registry (or clones the repo) and runs the README's commands one at a time. |
+| `publish` | **high** | Publishes from your terminal (`cargo publish`, `npm publish` or `uv publish`); skipped if the version exists. After a rate limit (HTTP 429) it refuses to retry for 24 hours unless `--force`. |
 
-crates.io accepts a trusted publisher only for a crate that already exists. So the first version
-goes out with `ship publish`; after that, `ship release` pushes a tag and `release.yml` publishes.
+crates.io and npm accept a trusted publisher only for a package that already exists, so there the
+first version goes out with `ship publish`. PyPI accepts a pending publisher, so `ship release`
+can publish even the first version. After that, `ship release` pushes a tag and `release.yml`
+publishes.
 
 ## Demo
 
@@ -112,10 +129,10 @@ $ ship create-repo --confirm
 {"v":1,"ok":true,"step":"create-repo","risk":"high",...,"data":{"repo":"you/hello-ship","visibility":"public","created":true,...}}
 
 $ ship publish --confirm          # first version only
-$ ship trusted-publishing         # opens crates.io settings; you click Save
+$ ship trusted-publishing         # opens the registry's settings; you click Save
 $ ship release --confirm          # tag v0.1.0; release.yml builds and publishes the GitHub release
 $ ship watch                      # call until "done": true
-$ ship verify                     # install from crates.io in a temp folder and run the README commands
+$ ship verify                     # install from the registry in a temp folder and run the README commands
 ```
 
 ## How it talks
@@ -152,7 +169,7 @@ Several separate layers, so no single mistake publishes anything:
 3. **The skill** tells Claude to dry-run, show you the plan, and wait for your yes before each
    gated step.
 4. **Your permission rules** ([docs/permissions.md](docs/permissions.md)) make Claude Code ask
-   before each gated step and deny raw `cargo publish`, `gh repo create` and force-pushes.
+   before each gated step and deny raw `cargo publish`, `npm publish`, `uv publish`, `gh repo create` and force-pushes.
 
 READMEs, CI logs and web pages are treated as data. `verify` only runs README lines in
 `bash`/`sh` blocks that start with the project's own binary, use no shell syntax, and don't look
@@ -168,8 +185,8 @@ cargo test
 Integration tests run entirely offline in temp folders. GitHub URLs are rewritten to local bare
 repositories, `gh` gets a dummy token and a dead proxy, and nothing is ever published.
 
-The registry layer is the `Registry` trait in `src/registry/`. Adding npm or PyPI means
-implementing it; the steps don't change.
+The registry layer is the `Registry` trait in `src/registry/`, implemented for crates.io, npm
+and PyPI. Adding another registry means implementing it; the steps don't change.
 
 ## License
 

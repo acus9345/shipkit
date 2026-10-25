@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Publish a project from a local folder to a public GitHub repo and a crates.io release with the `ship` CLI, safely and step by step. Use when the user wants to publish, release, ship, open-source, tag, version-bump or put a project on GitHub or crates.io, set up CI or trusted publishing, or check that a published package installs.
+description: Publish a project from a local folder to a public GitHub repo and a crates.io, npm or PyPI release with the `ship` CLI, safely and step by step. Use when the user wants to publish, release, ship, open-source, tag, version-bump or put a project on GitHub, crates.io, npm or PyPI, set up CI or trusted publishing, or check that a published package installs.
 ---
 
 # Shipping a project with `ship`
@@ -37,9 +37,19 @@ Run them in this order, stopping when one fails. Skip steps that do not apply
 | 14 | `ship verify` | medium | Installs from the real registry (or clones) in a temp folder and runs the README's commands. |
 | 15 | `ship publish` | **high** | Publishes from the terminal; skipped if the version exists. |
 
-crates.io only accepts a trusted publisher for a crate that already exists, so the
-very first version is published with `ship publish`; later versions are published
-by release.yml when `ship release` pushes the tag.
+## Registries
+
+`ship` detects the registry from the manifest: `Cargo.toml` (crates.io), `package.json`
+(npm) or `pyproject.toml` (PyPI, via `uv`). For a new project pass `--registry npm` or
+`--registry pypi` to `scaffold` (crates.io is the default).
+
+- **crates.io and npm** only accept a trusted publisher for a package that already exists:
+  publish the very first version with `ship publish`, then run `ship trusted-publishing`.
+- **PyPI** accepts a pending publisher: run `ship trusted-publishing` before the first
+  release (the user adds it on PyPI), then `ship release` publishes 0.1.0 from CI.
+  `ship publish` from the terminal is only needed if the user has a local PyPI token.
+
+Later versions are always published by release.yml when `ship release` pushes the tag.
 
 ## Gated steps: create-repo, release, publish
 

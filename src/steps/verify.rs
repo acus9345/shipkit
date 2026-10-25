@@ -72,7 +72,9 @@ impl Step for Verify {
         plan.push(Action::skip("temp folder", "a new empty folder under the system temp directory"));
         match (source, &info.bin) {
             (Source::Registry, Some(_)) => {
-                plan.push(Action::run(&reg.install_cmd(&info.name, &version, &tmp.join("root")), "install from the real registry"))
+                for c in reg.install_cmds(&info.name, &version, &tmp.join("root")) {
+                    plan.push(Action::run(&c, "install from the real registry"));
+                }
             }
             (Source::Registry, None) => {
                 for c in reg.library_smoke(&info.name, &version, &tmp) {
@@ -82,7 +84,9 @@ impl Step for Verify {
             (Source::Repo, _) => {
                 let url = self.clone_url(ctx)?;
                 plan.push(Action::run(&git(&tmp, &["clone", "--depth", "1", &url, "src"]), "clone the public repo"));
-                plan.push(Action::run(&reg.build_release_cmd(&tmp.join("src")), "build it"));
+                for c in reg.build_release_cmds(&tmp.join("src")) {
+                    plan.push(Action::run(&c, "build it"));
+                }
             }
         }
         let readme_text = std::fs::read_to_string(ctx.dir.join("README.md")).unwrap_or_default();
@@ -148,10 +152,11 @@ fn run_verify(
                 Some(bin) => {
                     let root = tmp.join("root");
                     std::fs::create_dir_all(&root)?;
-                    let cmd = reg.install_cmd(&info.name, version, &root);
-                    stages.push(cmd.display());
-                    run_stage("install", cmd)?;
-                    (Some(reg.installed_bin(&root, bin)), readme_text)
+                    for cmd in reg.install_cmds(&info.name, version, &root) {
+                        stages.push(cmd.display());
+                        run_stage("install", cmd)?;
+                    }
+                    (Some(reg.installed_bin_cmd(&root, bin)), readme_text)
                 }
                 None => {
                     for cmd in reg.library_smoke(&info.name, version, tmp) {
@@ -173,24 +178,27 @@ fn run_verify(
             stages.push(clone.display());
             run_stage("clone", clone)?;
             let src = tmp.join("src");
-            let build = reg.build_release_cmd(&src);
-            stages.push(build.display());
-            run_stage("build", build)?;
+            for build in reg.build_release_cmds(&src) {
+                stages.push(build.display());
+                run_stage("build", build)?;
+            }
             let readme_text = std::fs::read_to_string(src.join("README.md")).unwrap_or_default();
-            (info.bin.as_ref().map(|b| reg.built_bin(&src, b)), readme_text)
+            (info.bin.as_ref().map(|b| reg.built_bin_cmd(&src, b)), readme_text)
         }
     };
 
     let mut ran = Vec::new();
     let mut skipped = Vec::new();
-    if let (Some(bin), Some(path)) = (&info.bin, &bin_path) {
+    if let (Some(bin), Some(runner)) = (&info.bin, &bin_path) {
         let cmds = readme::commands(&readme_text, bin);
         skipped = cmds.skipped;
         let work = tmp.join("work");
         std::fs::create_dir_all(&work)?;
         for args in cmds.run {
-            let refs: Vec<&str> = args[1..].iter().map(String::as_str).collect();
-            let cmd = Cmd::new(&path.to_string_lossy(), &refs).cwd(&work).timeout(COMMAND_TIMEOUT);
+            let mut cmd = runner.clone().cwd(&work).timeout(COMMAND_TIMEOUT);
+            for a in &args[1..] {
+                cmd = cmd.arg(a.clone());
+            }
             let out = proc::run(&cmd, &ctx.log)?;
             let shown = args.join(" ");
             if !out.success() {

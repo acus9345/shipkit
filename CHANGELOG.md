@@ -6,6 +6,19 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-25
+
+### Added
+
+- npm support: package.json projects, `npm` checks and dry runs, trusted publishing with provenance in the release workflow, and `verify` for both libraries and CLIs.
+- PyPI support through `uv`: pyproject.toml projects (hatchling), `uv build` and `uv publish --dry-run`, a pending trusted publisher so even the first release can publish from CI, and `verify` in a fresh virtual environment.
+- `--registry crates.io|npm|pypi` on every step. The registry is detected from the manifest when it is left out.
+
+### Changed
+
+- The release workflows of all registries share one GitHub-release job.
+- `add-workflows` reports `executable` in place of `attach_binary`.
+
 ## [0.1.0] - 2026-10-25
 
 ### Added

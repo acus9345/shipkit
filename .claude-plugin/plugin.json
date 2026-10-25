@@ -1,11 +1,11 @@
 {
   "name": "shipkit",
   "displayName": "shipkit",
-  "version": "0.1.0",
-  "description": "Ship a project from a local folder to a GitHub repo and a crates.io release, safely, with the `ship` CLI. No MCP server.",
+  "version": "0.2.0",
+  "description": "Ship a project from a local folder to a GitHub repo and a crates.io, npm or PyPI release, safely, with the `ship` CLI. No MCP server.",
   "author": { "name": "acus9345", "url": "https://github.com/acus9345" },
   "homepage": "https://github.com/acus9345/shipkit",
   "repository": "https://github.com/acus9345/shipkit",
   "license": "MIT",
-  "keywords": ["publish", "release", "github", "crates-io", "trusted-publishing"]
+  "keywords": ["publish", "release", "github", "crates-io", "npm", "pypi", "trusted-publishing"]
 }

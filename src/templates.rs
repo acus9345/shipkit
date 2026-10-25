@@ -3,18 +3,19 @@
 use crate::registry::{NewProject, Registry};
 
 pub fn readme(p: &NewProject, reg: &dyn Registry) -> String {
-    let mut s = format!("# {}\n\n{}\n\n## Install\n\n{}\n", p.name, p.description, reg.install_doc(p));
-    s.push_str("## Usage\n\n");
-    if p.cli {
-        s.push_str(&format!("```bash\n{0} --help\n{0} --version\n{0} Ferris\n```\n\n", p.name));
-    } else {
-        s.push_str(&format!(
-            "```rust\nfn main() {{\n    println!(\"{{}}\", {}::greet(\"Ferris\"));\n}}\n```\n\n",
-            p.name.replace('-', "_")
-        ));
-    }
-    s.push_str("## License\n\nMIT. See [LICENSE](LICENSE).\n");
-    s
+    format!(
+        "# {}\n\n{}\n\n## Install\n\n{}\n## Usage\n\n{}\n## License\n\nMIT. See [LICENSE](LICENSE).\n",
+        p.name,
+        p.description,
+        reg.install_doc(p),
+        reg.usage_doc(p)
+    )
+}
+
+/// The usage block shared by every registry's CLI template: the commands
+/// `ship verify` later runs from the README.
+pub fn cli_usage(bin: &str) -> String {
+    format!("```bash\n{bin} --help\n{bin} --version\n{bin} Ferris\n```\n")
 }
 
 pub fn license_mit(year: &str, holder: &str) -> String {

@@ -40,8 +40,10 @@ impl Step for TrustedPublishing {
             .ok_or_else(|| ShipError::new(Code::Precondition, "no GitHub origin; run `ship create-repo` first"))?;
         let workflow = self.workflow.clone().unwrap_or_else(|| "release.yml".into());
         let workflow_present = ctx.dir.join(".github/workflows").join(&workflow).is_file();
-        let tp = reg.trusted_publishing(&info.name, &owner, &repo, &workflow);
-        let exists = !tp.needs_existing_package || !reg.name_available(&info.name, &ctx.log)?;
+        let published = !reg.name_available(&info.name, &ctx.log)?;
+        let tp = reg.trusted_publishing(&info.name, &owner, &repo, &workflow, published);
+        // Some registries (PyPI) accept a "pending" publisher before the first release.
+        let exists = published || !tp.needs_existing_package;
 
         let status = if !exists {
             plan.push(Action::skip(
@@ -71,6 +73,7 @@ impl Step for TrustedPublishing {
             "status": status,
             "registry": reg.id(),
             "package": info.name,
+            "published": published,
             "settings_url": tp.settings_url,
             "values": fields,
             "instructions": tp.instructions,

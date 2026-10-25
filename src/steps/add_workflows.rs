@@ -42,7 +42,8 @@ impl AddWorkflows {
             "private": private,
             "private_from": source,
             "publish_to_registry": w.publish,
-            "attach_binary": w.bin,
+            "registry": reg.id(),
+            "executable": w.bin,
             "runners": if private { "ubuntu-latest" } else { "ubuntu-latest, windows-latest" },
         });
         Ok((files, context))

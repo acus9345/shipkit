@@ -1,13 +1,13 @@
 [package]
 name = "shipkit"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.80"
-description = "Take a project from a local folder to a public GitHub repo and a registry release, safely. JSON in, JSON out."
+description = "Take a project from a local folder to a public GitHub repo and a crates.io, npm or PyPI release, safely. JSON in, JSON out."
 license = "MIT"
 repository = "https://github.com/acus9345/shipkit"
 readme = "README.md"
-keywords = ["publish", "release", "github", "crates-io", "cli"]
+keywords = ["publish", "release", "npm", "pypi", "crates-io"]
 categories = ["command-line-utilities", "development-tools"]
 authors = ["acus9345 <acus9345@gmail.com>"]
 homepage = "https://github.com/acus9345/shipkit"

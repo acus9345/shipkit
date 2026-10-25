@@ -20,10 +20,9 @@ pub fn precheck(ctx: &Ctx, reg: &dyn Registry, allow_dirty: bool, plan: &mut Pla
     plan.push(Action::skip("secret scan", "passed"));
     let needed = ctx.dir.join(reg.manifest()).is_file() && reg.project_info(&ctx.dir)?.publishable;
     if needed {
-        plan.push(Action::Run {
-            cmd: reg.dry_run_cmd(&ctx.dir).display(),
-            purpose: "registry dry run must pass first".into(),
-        });
+        for cmd in reg.dry_run_cmds(&ctx.dir) {
+            plan.push(Action::run(&cmd, "registry dry run must pass first"));
+        }
     } else {
         plan.push(Action::skip("registry dry run", "the manifest blocks publishing"));
     }

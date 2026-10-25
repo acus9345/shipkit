@@ -250,11 +250,30 @@ pub fn open_url_cmd(url: &str) -> Result<Cmd> {
 
 /// First line of `<tool> --version`, or None if the tool is missing or fails.
 pub fn version_of(tool: &str, log: &Logger) -> Option<String> {
-    let out = run(&Cmd::new(tool, &["--version"]).timeout(Duration::from_secs(20)), log).ok()?;
+    first_line_of(&Cmd::new(tool, &["--version"]).timeout(Duration::from_secs(20)), log)
+}
+
+/// First non-empty output line of a successful command, or None.
+pub fn first_line_of(cmd: &Cmd, log: &Logger) -> Option<String> {
+    let out = run(cmd, log).ok()?;
     if !out.success() {
         return None;
     }
-    out.stdout.lines().next().map(|l| l.trim().to_string())
+    format!("{}\n{}", out.stdout, out.stderr)
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(str::to_string)
+}
+
+/// Name to spawn for a Node.js tool: npm and npx are `.cmd` shims on Windows,
+/// which `Command` does not find without the extension.
+pub fn node_tool(name: &str) -> String {
+    if cfg!(windows) {
+        format!("{name}.cmd")
+    } else {
+        name.to_string()
+    }
 }
 
 #[cfg(test)]

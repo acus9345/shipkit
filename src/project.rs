@@ -172,6 +172,26 @@ pub mod toml_lite {
         None
     }
 
+    /// The first key defined in `[section]` (e.g. the first console script in
+    /// `[project.scripts]`).
+    pub fn first_key(toml: &str, section: &str) -> Option<String> {
+        let mut current = "";
+        for raw in toml.lines() {
+            let line = strip_comment(raw).trim();
+            if line.starts_with('[') {
+                current = line.trim_matches(|c| c == '[' || c == ']').trim();
+                continue;
+            }
+            if current == section {
+                if let Some((k, _)) = line.split_once('=') {
+                    let k = k.trim();
+                    return Some(unquote(k).unwrap_or_else(|| k.to_string()));
+                }
+            }
+        }
+        None
+    }
+
     /// String value of `key` in `[section]`, if it is a plain quoted string.
     pub fn get_str(toml: &str, section: &str, key: &str) -> Option<String> {
         unquote(get_raw(toml, section, key)?)
@@ -267,4 +287,103 @@ pub fn git_identity(dir: &Path, log: &Logger) -> Option<(String, String)> {
             .filter(|s| !s.is_empty())
     };
     Some((get("user.name")?, get("user.email")?))
+}
+
+/// Edits one string value in a JSON document without re-serializing it, so
+/// key order, indentation and line endings stay exactly as they were.
+pub mod json_lite {
+    enum Frame {
+        Obj { key: Option<String>, expecting_key: bool },
+        Arr,
+    }
+
+    /// Byte range (inside the quotes) of the string value at `path`, a list of
+    /// object keys from the root.
+    pub fn string_span(text: &str, path: &[&str]) -> Option<(usize, usize)> {
+        let bytes = text.as_bytes();
+        let mut stack: Vec<Frame> = Vec::new();
+        let mut keys: Vec<String> = Vec::new(); // key of each enclosing container
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'{' | b'[' => {
+                    if !stack.is_empty() {
+                        keys.push(match stack.last() {
+                            Some(Frame::Obj { key: Some(k), .. }) => k.clone(),
+                            _ => "[]".to_string(),
+                        });
+                    }
+                    stack.push(if bytes[i] == b'{' { Frame::Obj { key: None, expecting_key: true } } else { Frame::Arr });
+                }
+                b'}' | b']' => {
+                    stack.pop();
+                    keys.pop();
+                }
+                b':' => {
+                    if let Some(Frame::Obj { expecting_key, .. }) = stack.last_mut() {
+                        *expecting_key = false;
+                    }
+                }
+                b',' => {
+                    if let Some(Frame::Obj { key, expecting_key }) = stack.last_mut() {
+                        *key = None;
+                        *expecting_key = true;
+                    }
+                }
+                b'"' => {
+                    let start = i + 1;
+                    let mut j = start;
+                    while j < bytes.len() && bytes[j] != b'"' {
+                        j += if bytes[j] == b'\\' { 2 } else { 1 };
+                    }
+                    let s = &text[start..j.min(text.len())];
+                    match stack.last_mut() {
+                        Some(Frame::Obj { key, expecting_key: true }) => *key = Some(s.to_string()),
+                        Some(Frame::Obj { key: Some(k), expecting_key: false }) => {
+                            let here: Vec<&str> = keys.iter().map(String::as_str).chain([k.as_str()]).collect();
+                            if here == path {
+                                return Some((start, j));
+                            }
+                        }
+                        _ => {}
+                    }
+                    i = j;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// Replace the string value at `path`. None if it isn't there.
+    pub fn set_string(text: &str, path: &[&str], value: &str) -> Option<String> {
+        let (s, e) = string_span(text, path)?;
+        Some(format!("{}{}{}", &text[..s], value.replace('\\', "\\\\").replace('"', "\\\""), &text[e..]))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        const LOCK: &str = "{\n  \"name\": \"demo\",\n  \"version\": \"0.1.0\",\n  \"lockfileVersion\": 3,\n  \"packages\": {\n    \"\": {\n      \"name\": \"demo\",\n      \"version\": \"0.1.0\"\n    },\n    \"node_modules/x\": {\n      \"version\": \"0.1.0\"\n    }\n  },\n  \"tags\": [\"a\", {\"version\": \"9\"}]\n}\n";
+
+        #[test]
+        fn finds_nested_paths_only() {
+            let (s, e) = string_span(LOCK, &["version"]).unwrap();
+            assert_eq!(&LOCK[s..e], "0.1.0");
+            let out = set_string(LOCK, &["version"], "0.2.0").unwrap();
+            let out = set_string(&out, &["packages", "", "version"], "0.2.0").unwrap();
+            assert_eq!(out.matches("0.2.0").count(), 2);
+            assert!(out.contains("\"node_modules/x\": {\n      \"version\": \"0.1.0\""));
+            assert!(string_span(LOCK, &["missing"]).is_none());
+        }
+
+        #[test]
+        fn ignores_keys_inside_strings_and_escapes() {
+            let t = r#"{"description": "has \"version\": \"x\" inside", "version": "1.0.0"}"#;
+            let (s, e) = string_span(t, &["version"]).unwrap();
+            assert_eq!(&t[s..e], "1.0.0");
+        }
+    }
 }

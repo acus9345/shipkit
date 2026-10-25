@@ -54,7 +54,7 @@ impl Step for CheckNames {
         let mut plan = Plan::default();
         if target.has_package() {
             plan.push(Action::Run {
-                cmd: format!("GET https://crates.io/api/v1/crates/{name}"),
+                cmd: format!("GET {}", reg.name_lookup_url(&name)),
                 purpose: format!("is `{name}` free on {}", reg.id()),
             });
         }

@@ -28,9 +28,13 @@ impl Step for Inspect {
             plan.push(Action::skip("registry dry run", "the manifest blocks publishing (repo-only project)"));
             return Ok(plan);
         }
-        plan.push(Action::run(&reg.package_list_cmd(&ctx.dir), "list the files that would be published"));
+        for cmd in reg.package_files_plan(&ctx.dir) {
+            plan.push(Action::run(&cmd, "list the files that would be published"));
+        }
         plan.push(Action::skip("secret scan", "runs locally over that file list"));
-        plan.push(Action::run(&reg.dry_run_cmd(&ctx.dir), "registry dry run (builds the package, uploads nothing)"));
+        for cmd in reg.dry_run_cmds(&ctx.dir) {
+            plan.push(Action::run(&cmd, "registry dry run (builds the package, uploads nothing)"));
+        }
         Ok(plan)
     }
 
@@ -56,12 +60,10 @@ impl Step for Inspect {
 
 /// File list, junk, secret scan and dry run. Fails on secrets or a failed dry run.
 pub fn inspect_package(reg: &dyn Registry, dir: &Path, ctx: &Ctx) -> Result<Value> {
-    let list_cmd = reg.package_list_cmd(dir);
-    let listed = proc::run_ok(&list_cmd, &ctx.log).map_err(|e| {
+    let files = reg.package_files(dir, &ctx.log).map_err(|e| {
         ShipError::new(Code::CheckFailed, format!("could not list package files: {}", e.message))
             .with_details(e.details.unwrap_or(Value::Null))
     })?;
-    let files = reg.parse_package_list(&listed.stdout);
     let generated = reg.generated_package_files();
     let real: Vec<String> = files
         .iter()
@@ -79,18 +81,33 @@ pub fn inspect_package(reg: &dyn Registry, dir: &Path, ctx: &Ctx) -> Result<Valu
             .with_details(json!({ "findings": scan.findings, "files": files })));
     }
 
-    let dry_cmd = reg.dry_run_cmd(dir);
-    let dry = proc::run(&dry_cmd, &ctx.log)?;
-    if !dry.success() {
-        return Err(ShipError::new(Code::CheckFailed, format!("registry dry run failed: {}", dry_cmd.display()))
-            .with_details(json!({ "output": dry.tail(60), "files": files, "junk": junk })));
-    }
+    let mut ran = Vec::new();
+    let result = (|| {
+        for dry_cmd in reg.dry_run_cmds(dir) {
+            let dry = proc::run(&dry_cmd, &ctx.log)?;
+            if !dry.success() {
+                return Err(ShipError::new(Code::CheckFailed, format!("registry dry run failed: {}", dry_cmd.display()))
+                    .with_details(json!({ "output": dry.tail(60), "files": files, "junk": junk })));
+            }
+            ran.push(dry_cmd.display());
+        }
+        Ok(())
+    })();
+    remove_scratch(reg, dir, "");
+    result?;
     Ok(json!({
         "files": files,
         "file_count": files.len(),
         "junk": junk,
-        "dry_run": { "ok": true, "cmd": dry_cmd.display() },
+        "dry_run": { "ok": true, "cmds": ran },
     }))
+}
+
+/// Delete the registry's temporary build folders, if it made any.
+pub fn remove_scratch(reg: &dyn Registry, dir: &Path, version: &str) {
+    for d in reg.scratch_dirs(dir, version) {
+        let _ = std::fs::remove_dir_all(d);
+    }
 }
 
 /// Why a packaged file looks like it should not be published, if it does.

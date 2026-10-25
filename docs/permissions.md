@@ -45,6 +45,8 @@ the dangerous things `ship` refuses to do by going around it.
       "Bash(git tag -d *)",
       "Bash(git tag -f *)",
       "Bash(npm publish *)",
+      "Bash(npm unpublish *)",
+      "Bash(uv publish *)",
       "Bash(twine upload *)"
     ]
   }
@@ -58,7 +60,7 @@ How the layers fit together:
   `--confirm` (or `--dry-run`), so Claude has to show you the plan first.
 - **`ship` itself**: refuses gated steps without `--confirm`, refuses outward steps on a dirty tree,
   and runs the secret scan and the registry dry run first.
-- **`deny`**: keeps Claude from running the raw `cargo publish`, `gh repo create`, `gh release create`
+- **`deny`**: keeps Claude from running the raw `cargo publish`, `npm publish`, `uv publish`, `gh repo create`, `gh release create`
   or tag/force-push commands directly. `ship` runs those as child processes, which these rules do not
   affect, so it keeps working.
 

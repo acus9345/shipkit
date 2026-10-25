@@ -1,7 +1,7 @@
 {
   "name": "shipkit",
   "owner": { "name": "acus9345", "url": "https://github.com/acus9345" },
-  "description": "The shipkit plugin: safe publishing to GitHub and crates.io with the `ship` CLI.",
+  "description": "The shipkit plugin: safe publishing to GitHub, crates.io, npm and PyPI with the `ship` CLI.",
   "plugins": [
     {
       "name": "shipkit",

@@ -27,8 +27,11 @@ impl Step for Preflight {
     fn plan(&self, ctx: &Ctx) -> Result<Plan> {
         let reg = registry::resolve(self.registry.as_deref(), &ctx.dir)?;
         let mut plan = Plan::default();
-        for tool in ["git", "gh", reg.cli()] {
+        for tool in ["git", "gh"] {
             plan.push(Action::run(&Cmd::new(tool, &["--version"]), "is it installed"));
+        }
+        for (_, cmd) in reg.tool_checks() {
+            plan.push(Action::run(&cmd, "is it installed"));
         }
         for key in ["user.name", "user.email"] {
             plan.push(Action::run(
@@ -53,8 +56,10 @@ impl Step for Preflight {
         let mut warnings: Vec<String> = Vec::new();
 
         let mut tools = BTreeMap::new();
-        for tool in ["git", "gh", reg.cli()] {
-            let version = proc::version_of(tool, &ctx.log);
+        let mut checks = vec![("git", Cmd::new("git", &["--version"])), ("gh", Cmd::new("gh", &["--version"]))];
+        checks.extend(reg.tool_checks());
+        for (tool, cmd) in checks {
+            let version = proc::first_line_of(&cmd.timeout(Duration::from_secs(30)), &ctx.log);
             if version.is_none() {
                 problems.push(format!("`{tool}` is not installed or not on PATH"));
             }

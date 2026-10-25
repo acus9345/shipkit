@@ -4,6 +4,7 @@ mod templates;
 
 use super::{LoginStatus, NewProject, ProjectInfo, Registry, TrustedPublishing, WorkflowSpec};
 use crate::error::{Code, Result, ShipError};
+use crate::http;
 use crate::log::{home_dir, Logger};
 use crate::proc::{self, Cmd};
 use crate::project::toml_lite;
@@ -13,7 +14,6 @@ use std::time::Duration;
 pub struct CratesIo;
 
 const API: &str = "https://crates.io/api/v1/crates";
-const USER_AGENT: &str = concat!("shipkit/", env!("CARGO_PKG_VERSION"), " (+https://github.com/acus9345/shipkit)");
 const LONG: Duration = Duration::from_secs(30 * 60);
 
 /// Names crates.io refuses (Windows device names and a few reserved crate names).
@@ -111,11 +111,15 @@ impl Registry for CratesIo {
 
     fn name_available(&self, name: &str, log: &Logger) -> Result<bool> {
         // crates.io matches names case-insensitively and treats `-` and `_` as equal.
-        Ok(api_status(&format!("{API}/{name}"), log)? == 404)
+        Ok(!http::exists(&self.name_lookup_url(name), log)?)
     }
 
     fn version_exists(&self, name: &str, version: &str, log: &Logger) -> Result<bool> {
-        Ok(api_status(&format!("{API}/{name}/{version}"), log)? == 200)
+        http::exists(&format!("{API}/{name}/{version}"), log)
+    }
+
+    fn name_lookup_url(&self, name: &str) -> String {
+        format!("{API}/{name}")
     }
 
     fn project_info(&self, dir: &Path) -> Result<ProjectInfo> {
@@ -158,6 +162,16 @@ impl Registry for CratesIo {
         templates::install_doc(p)
     }
 
+    fn usage_doc(&self, p: &NewProject) -> String {
+        if p.cli {
+            return crate::templates::cli_usage(&p.name);
+        }
+        format!(
+            "```rust\nfn main() {{\n    println!(\"{{}}\", {}::greet(\"Ferris\"));\n}}\n```\n",
+            p.name.replace('-', "_")
+        )
+    }
+
     fn checks(&self, dir: &Path) -> Vec<(&'static str, Cmd)> {
         let c = |args: &[&str]| Cmd::new("cargo", args).cwd(dir).timeout(LONG);
         vec![
@@ -167,24 +181,26 @@ impl Registry for CratesIo {
         ]
     }
 
-    fn package_list_cmd(&self, dir: &Path) -> Cmd {
-        Cmd::new("cargo", &["package", "--list", "--allow-dirty"]).cwd(dir).timeout(LONG)
+    fn package_files_plan(&self, dir: &Path) -> Vec<Cmd> {
+        vec![Cmd::new("cargo", &["package", "--list", "--allow-dirty"]).cwd(dir).timeout(LONG)]
     }
 
-    fn parse_package_list(&self, stdout: &str) -> Vec<String> {
-        stdout
+    fn package_files(&self, dir: &Path, log: &Logger) -> Result<Vec<String>> {
+        let out = proc::run_ok(&self.package_files_plan(dir)[0], log)?;
+        Ok(out
+            .stdout
             .lines()
             .map(|l| l.trim().replace('\\', "/"))
             .filter(|l| !l.is_empty())
-            .collect()
+            .collect())
     }
 
     fn generated_package_files(&self) -> &'static [&'static str] {
         &["Cargo.toml.orig", ".cargo_vcs_info.json", "Cargo.lock"]
     }
 
-    fn dry_run_cmd(&self, dir: &Path) -> Cmd {
-        Cmd::new("cargo", &["publish", "--dry-run", "--allow-dirty"]).cwd(dir).timeout(LONG)
+    fn dry_run_cmds(&self, dir: &Path) -> Vec<Cmd> {
+        vec![Cmd::new("cargo", &["publish", "--dry-run", "--allow-dirty"]).cwd(dir).timeout(LONG)]
     }
 
     fn set_version(&self, dir: &Path, info: &ProjectInfo, new: &str) -> Result<Vec<(String, String)>> {
@@ -200,7 +216,7 @@ impl Registry for CratesIo {
         Ok(files)
     }
 
-    fn trusted_publishing(&self, package: &str, owner: &str, repo: &str, workflow: &str) -> TrustedPublishing {
+    fn trusted_publishing(&self, package: &str, owner: &str, repo: &str, workflow: &str, _exists: bool) -> TrustedPublishing {
         TrustedPublishing {
             settings_url: format!("https://crates.io/crates/{package}/settings"),
             fields: vec![
@@ -215,12 +231,12 @@ impl Registry for CratesIo {
         }
     }
 
-    fn publish_cmd(&self, dir: &Path, allow_dirty: bool) -> Cmd {
+    fn publish_cmds(&self, dir: &Path, _version: &str, allow_dirty: bool) -> Vec<Cmd> {
         let mut c = Cmd::new("cargo", &["publish"]).cwd(dir).timeout(LONG);
         if allow_dirty {
             c = c.arg("--allow-dirty");
         }
-        c
+        vec![c]
     }
 
     fn is_rate_limited(&self, output: &str) -> bool {
@@ -232,15 +248,16 @@ impl Registry for CratesIo {
         format!("https://crates.io/crates/{name}/{version}")
     }
 
-    fn install_cmd(&self, name: &str, version: &str, root: &Path) -> Cmd {
+    fn install_cmds(&self, name: &str, version: &str, root: &Path) -> Vec<Cmd> {
         let root_s = root.to_string_lossy().into_owned();
-        Cmd::new("cargo", &["install", name, "--version", &format!("={version}"), "--root", &root_s])
+        vec![Cmd::new("cargo", &["install", name, "--version", &format!("={version}"), "--root", &root_s])
             .cwd(root)
-            .timeout(LONG)
+            .timeout(LONG)]
     }
 
-    fn installed_bin(&self, root: &Path, bin: &str) -> PathBuf {
-        root.join("bin").join(format!("{bin}{}", std::env::consts::EXE_SUFFIX))
+    fn installed_bin_cmd(&self, root: &Path, bin: &str) -> Cmd {
+        let exe = root.join("bin").join(format!("{bin}{}", std::env::consts::EXE_SUFFIX));
+        Cmd::new(&exe.to_string_lossy(), &[])
     }
 
     fn library_smoke(&self, name: &str, version: &str, dir: &Path) -> Vec<Cmd> {
@@ -252,12 +269,13 @@ impl Registry for CratesIo {
         ]
     }
 
-    fn build_release_cmd(&self, dir: &Path) -> Cmd {
-        Cmd::new("cargo", &["build", "--release"]).cwd(dir).timeout(LONG)
+    fn build_release_cmds(&self, dir: &Path) -> Vec<Cmd> {
+        vec![Cmd::new("cargo", &["build", "--release"]).cwd(dir).timeout(LONG)]
     }
 
-    fn built_bin(&self, dir: &Path, bin: &str) -> PathBuf {
-        dir.join("target").join("release").join(format!("{bin}{}", std::env::consts::EXE_SUFFIX))
+    fn built_bin_cmd(&self, dir: &Path, bin: &str) -> Cmd {
+        let exe = dir.join("target").join("release").join(format!("{bin}{}", std::env::consts::EXE_SUFFIX));
+        Cmd::new(&exe.to_string_lossy(), &[])
     }
 
     fn ci_workflow(&self, w: &WorkflowSpec) -> String {
@@ -266,19 +284,6 @@ impl Registry for CratesIo {
 
     fn release_workflow(&self, w: &WorkflowSpec) -> String {
         templates::release_workflow(w)
-    }
-}
-
-/// HTTP status of a read-only crates.io API GET. 429 maps to `E_RATE_LIMITED`.
-fn api_status(url: &str, log: &Logger) -> Result<u16> {
-    let cmd = Cmd::new("curl", &["-s", "-o", null_device(), "-w", "%{http_code}", "--max-time", "20", "-A", USER_AGENT, url])
-        .timeout(Duration::from_secs(30));
-    let out = proc::run_ok(&cmd, log)?;
-    let code: u16 = out.stdout.trim().parse().unwrap_or(0);
-    match code {
-        200 | 404 => Ok(code),
-        429 => Err(ShipError::new(Code::RateLimited, "crates.io answered 429 (rate limited); try again later")),
-        _ => Err(ShipError::new(Code::CommandFailed, format!("crates.io API returned HTTP {code} for {url}"))),
     }
 }
 
@@ -291,14 +296,6 @@ fn set_lock_version(lock: &str, name: &str, old: &str, new: &str) -> Option<Stri
     }
     let out = norm.replacen(&needle, &format!("name = \"{name}\"\nversion = \"{new}\"\n"), 1);
     Some(if lock.contains("\r\n") { out.replace('\n', "\r\n") } else { out })
-}
-
-fn null_device() -> &'static str {
-    if cfg!(windows) {
-        "NUL"
-    } else {
-        "/dev/null"
-    }
 }
 
 fn cargo_home() -> Option<PathBuf> {

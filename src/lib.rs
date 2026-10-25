@@ -7,6 +7,7 @@ pub mod error;
 pub mod gate;
 pub mod github;
 pub mod hook;
+pub mod http;
 pub mod log;
 pub mod output;
 pub mod proc;

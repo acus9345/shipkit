@@ -75,7 +75,9 @@ impl Step for Commit {
         plan.push(Action::skip("secret scan", "passed"));
         if f.dry_run_needed {
             let reg = registry::resolve(self.registry.as_deref(), &ctx.dir)?;
-            plan.push(Action::run(&reg.dry_run_cmd(&ctx.dir), "registry dry run must pass before committing"));
+            for cmd in reg.dry_run_cmds(&ctx.dir) {
+                plan.push(Action::run(&cmd, "registry dry run must pass before committing"));
+            }
         } else {
             plan.push(Action::skip("registry dry run", "no publishable manifest"));
         }
