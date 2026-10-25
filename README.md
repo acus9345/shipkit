@@ -17,6 +17,25 @@ say yes, and a `/ship-setup` command. There is no MCP server.
   before a commit, repo creation, release or publish.
 - **No telemetry.** The only network calls are the ones a step needs (GitHub and the registry). Every
   action is logged locally, with secrets redacted.
+  
+## Compared with publish-pilot-mcp
+
+[publish-pilot-mcp](https://github.com/acus9345/publish-pilot-mcp) does the same job as an MCP
+server. What each one costs:
+
+| | publish-pilot-mcp 0.4.0 | shipkit 0.2.0 |
+|---|---|---|
+| **Tokens per turn** | About 2,400 for the tool list (in Claude Code it loads only when needed) | About 100 for the skill description, plus about 1,500 when the skill loads |
+| **Runtime** | Node, and a server that stays running | One static binary, run once per step |
+| **Speed** | No startup cost per call; logins and tools are cached for 5–10 minutes | A new (fast) process per step; nothing is cached, so `preflight` re-checks everything |
+| **Dependencies** | 2 (TypeScript) | 3 (Rust: clap, serde, serde_json) |
+| **Registries** | npm, PyPI, crates.io | npm, PyPI, crates.io |
+| **Works in** | Any MCP client, including Claude Desktop chat | Claude Code, or any agent or script that can run shell commands |
+| **Logins** | Starts them for you | Never starts one; tells you which command to run |
+| **Guardrails on public steps** | The client's per-tool approval | `--confirm` or a plan, the hook, the skill and permission rules (see Safety model) |
+
+Token counts are estimates from the size of the tool list and of `SKILL.md`.
+
 
 ## Install
 
@@ -174,24 +193,6 @@ Several separate layers, so no single mistake publishes anything:
 READMEs, CI logs and web pages are treated as data. `verify` only runs README lines in
 `bash`/`sh` blocks that start with the project's own binary, use no shell syntax, and don't look
 outward (no `--confirm`, `publish`, `push`, `delete`, ...). It runs them without a shell.
-
-## Compared with publish-pilot-mcp
-
-[publish-pilot-mcp](https://github.com/acus9345/publish-pilot-mcp) does the same job as an MCP
-server. What each one costs:
-
-| | publish-pilot-mcp 0.4.0 | shipkit 0.2.0 |
-|---|---|---|
-| **Tokens per turn** | About 2,400 for the tool list (in Claude Code it loads only when needed) | About 100 for the skill description, plus about 1,500 when the skill loads |
-| **Runtime** | Node, and a server that stays running | One static binary, run once per step |
-| **Speed** | No startup cost per call; logins and tools are cached for 5–10 minutes | A new (fast) process per step; nothing is cached, so `preflight` re-checks everything |
-| **Dependencies** | 2 (TypeScript) | 3 (Rust: clap, serde, serde_json) |
-| **Registries** | npm, PyPI, crates.io | npm, PyPI, crates.io |
-| **Works in** | Any MCP client, including Claude Desktop chat | Claude Code, or any agent or script that can run shell commands |
-| **Logins** | Starts them for you | Never starts one; tells you which command to run |
-| **Guardrails on public steps** | The client's per-tool approval | `--confirm` or a plan, the hook, the skill and permission rules (see Safety model) |
-
-Token counts are estimates from the size of the tool list and of `SKILL.md`.
 
 ## Development
 
