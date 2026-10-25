@@ -1,0 +1,17 @@
+{
+  "description": "Block gated ship commands (create-repo, release, publish) that lack --confirm.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ship hook pre-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

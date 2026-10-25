@@ -1,0 +1,6 @@
+# Link the C runtime statically on Windows so `ship.exe` is a single self-contained file.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

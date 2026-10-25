@@ -1,0 +1,29 @@
+[package]
+name = "shipkit"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Take a project from a local folder to a public GitHub repo and a registry release, safely. JSON in, JSON out."
+license = "MIT"
+repository = "https://github.com/acus9345/shipkit"
+readme = "README.md"
+keywords = ["publish", "release", "github", "crates-io", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+authors = ["acus9345 <acus9345@gmail.com>"]
+homepage = "https://github.com/acus9345/shipkit"
+# The crate carries only what `cargo install` needs; the Claude Code plugin lives in the repo.
+include = ["src/**/*.rs", "tests/**/*.rs", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE", "CHANGELOG.md"]
+
+[[bin]]
+name = "ship"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
