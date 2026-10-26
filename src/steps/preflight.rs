@@ -1,5 +1,5 @@
 //! `ship preflight`: which tools are installed, who is logged in, and the git
-//! identity. Read-only, and never starts a login.
+//! identity. Read-only, and never starts a login (that is `ship login`).
 
 use super::{Ctx, Step};
 use crate::error::Result;
@@ -61,7 +61,7 @@ impl Step for Preflight {
         for (tool, cmd) in checks {
             let version = proc::first_line_of(&cmd.timeout(Duration::from_secs(30)), &ctx.log);
             if version.is_none() {
-                problems.push(format!("`{tool}` is not installed or not on PATH"));
+                problems.push(format!("`{tool}` is not installed or not on PATH; install it yourself or with `ship install-tool`"));
             }
             tools.insert(tool, json!({ "installed": version.is_some(), "version": version }));
         }
@@ -78,7 +78,7 @@ impl Step for Preflight {
         let github = if tools["gh"]["installed"] == true {
             let accounts = gh_accounts(&ctx.log);
             if !accounts.iter().any(|a| a.active && a.state == "success") {
-                problems.push("not logged in to GitHub; run `gh auth login` yourself".into());
+                problems.push("not logged in to GitHub; run `ship login gh` (or `gh auth login` yourself)".into());
             }
             for a in accounts.iter().filter(|a| a.active) {
                 if !a.scopes.is_empty() && !a.scopes.iter().any(|s| s == "workflow") {
@@ -96,8 +96,9 @@ impl Step for Preflight {
         let login = reg.login_status();
         if !login.logged_in {
             warnings.push(format!(
-                "no local {} credential; publishing from the terminal will fail until you log in, but trusted publishing from CI does not need one",
-                reg.id()
+                "no local {} credential; publishing from the terminal will fail until you log in (`ship login {}`), but trusted publishing from CI does not need one",
+                reg.id(),
+                if reg.id() == "crates.io" { "cargo" } else { reg.id() }
             ));
         }
 
@@ -165,7 +166,7 @@ struct GhHost {
     scopes: Option<String>,
 }
 
-fn gh_accounts(log: &Logger) -> Vec<GhAccount> {
+pub fn gh_accounts(log: &Logger) -> Vec<GhAccount> {
     let cmd = Cmd::new("gh", &["auth", "status", "--json", "hosts"]).timeout(Duration::from_secs(30));
     match proc::run(&cmd, log) {
         Ok(out) => parse_gh_status(&out.stdout),

@@ -163,6 +163,15 @@ pub trait Registry {
     fn publish_cmds(&self, dir: &Path, version: &str, allow_dirty: bool) -> Vec<Cmd>;
     /// Whether publish output means the registry rate-limited us (HTTP 429).
     fn is_rate_limited(&self, output: &str) -> bool;
+    /// Whether a failed publish only needs the user's interactive approval
+    /// (2FA), so the same command is re-run in a visible window for them.
+    fn needs_approval(&self, _output: &str) -> bool {
+        false
+    }
+    /// What the user may have to do during a terminal publish, for plans.
+    fn publish_note(&self) -> Option<&'static str> {
+        None
+    }
     /// Public page of one version.
     fn package_url(&self, name: &str, version: &str) -> String;
     /// Install `name@version` from the real registry into the empty folder `root`.

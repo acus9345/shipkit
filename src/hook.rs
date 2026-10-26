@@ -1,5 +1,5 @@
 //! Claude Code PreToolUse hook: blocks any gated `ship` command (create-repo,
-//! release, publish) that lacks `--confirm`. Everything else gets no opinion,
+//! release, publish, install-tool) that lacks `--confirm`. Everything else gets no opinion,
 //! so the user's normal permission rules still apply.
 
 use crate::gate;
@@ -52,8 +52,9 @@ pub fn decide(command: &str) -> Option<String> {
         if let Some((step, args)) = ship_invocation(&tokens) {
             if gate::is_gated(&step) && !args.iter().any(|a| a == "--confirm" || a == "--dry-run") {
                 return Some(format!(
-                    "`ship {step}` is public or irreversible. First run it with --dry-run and show the user the plan, \
-                     get their explicit OK in chat, then re-run it with --confirm."
+                    "`ship {step}` {}. First run it with --dry-run and show the user the plan, \
+                     get their explicit OK in chat, then re-run it with --confirm.",
+                    gate::gate_reason(&step)
                 ));
             }
         }
@@ -145,6 +146,9 @@ mod tests {
         for cmd in ["ship release --confirm", "ship publish --dry-run", "ship --confirm create-repo"] {
             assert!(!blocked(cmd), "{cmd}");
         }
+        assert!(decide("ship install-tool uv").unwrap().contains("installs software"));
+        assert!(!blocked("ship install-tool uv --confirm"));
+        assert!(!blocked("ship login npm"));
     }
 
     #[test]

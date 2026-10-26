@@ -23,7 +23,7 @@ say yes, and a `/ship-setup` command. There is no MCP server.
 [publish-pilot-mcp](https://github.com/acus9345/publish-pilot-mcp) does the same job as an MCP
 server. What each one costs:
 
-| | publish-pilot-mcp 0.4.0 | shipkit 0.2.0 |
+| | publish-pilot-mcp 0.4.0 | shipkit 0.3.0 |
 |---|---|---|
 | **Tokens per turn** | About 2,400 for the tool list (in Claude Code it loads only when needed) | About 100 for the skill description, plus about 1,500 when the skill loads |
 | **Runtime** | Node, and a server that stays running | One static binary, run once per step |
@@ -31,7 +31,8 @@ server. What each one costs:
 | **Dependencies** | 2 (TypeScript) | 3 (Rust: clap, serde, serde_json) |
 | **Registries** | npm, PyPI, crates.io | npm, PyPI, crates.io |
 | **Works in** | Any MCP client, including Claude Desktop chat | Claude Code, or any agent or script that can run shell commands |
-| **Logins** | Starts them for you | Never starts one; tells you which command to run |
+| **Logins** | Starts them for you | `ship login` opens the official login in a window; you finish it there |
+| **Installing tools** | `install_tool` | `ship install-tool` (winget or Homebrew), gated behind `--confirm` |
 | **Guardrails on public steps** | The client's per-tool approval | `--confirm` or a plan, the hook, the skill and permission rules (see Safety model) |
 
 Token counts are estimates from the size of the tool list and of `SKILL.md`.
@@ -58,7 +59,8 @@ ship self-test
 ```
 
 `ship` needs `git` and the GitHub CLI `gh` (logged in with `gh auth login`), plus the tool for
-your registry. `ship preflight` checks all of them and never starts a login itself.
+your registry. `ship preflight` checks all of them and never starts a login itself. If something
+is missing, `ship install-tool` and `ship login` can set it up (see Setup helpers).
 
 ## Registries
 
@@ -116,6 +118,23 @@ crates.io and npm accept a trusted publisher only for a package that already exi
 first version goes out with `ship publish`. PyPI accepts a pending publisher, so `ship release`
 can publish even the first version. After that, `ship release` pushes a tag and `release.yml`
 publishes.
+
+Publishing from the terminal:
+
+- **npm with 2FA:** npm only asks for 2FA approval in a terminal. When it asks, `ship publish`
+  re-runs the same `npm publish` in a window; press Enter there and approve in the browser.
+- **PyPI:** `uv publish` with a `uv auth login` credential (what `ship login pypi` stores) or
+  `UV_PUBLISH_TOKEN`. A credential in `.pypirc` or `TWINE_PASSWORD` is uploaded with twine
+  (`uv tool run twine`), because `uv publish` does not read those.
+
+## Setup helpers
+
+Run only when you ask for them.
+
+| Command | Risk | What it does |
+|---|---|---|
+| `login gh\|npm\|cargo\|pypi` | medium | Opens the tool's official login in a visible window and waits up to 15 minutes for you to finish it. GitHub and npm approve in the browser. crates.io and PyPI have no browser login, so it opens the token page and you paste the token into the tool's own prompt (`cargo login`, `uv auth login`) in that window. ship never sees what you enter. Skipped if you are already logged in. Windows only; elsewhere it prints the command to run. |
+| `install-tool gh\|git\|node\|uv` | **high** | Installs the tool with winget on Windows (exact package ID, accepting its license) or Homebrew on macOS. Refused without `--confirm`. Skipped if the tool is already installed. |
 
 ## Demo
 
@@ -179,10 +198,10 @@ failure  {"v":1,"ok":false,"step":"<step>","error":{"code":"E_...","message":"..
 
 Several separate layers, so no single mistake publishes anything:
 
-1. **`ship` itself** refuses `create-repo`, `release` and `publish` without `--confirm`. Before any
-   of them, it refuses a dirty working tree (unless `--allow-dirty`) and runs the secret scan and
-   the registry dry run.
-2. **The plugin's PreToolUse hook** (on Bash and PowerShell) blocks those three commands without
+1. **`ship` itself** refuses `create-repo`, `release`, `publish` and `install-tool` without
+   `--confirm`. Before the first three, it refuses a dirty working tree (unless `--allow-dirty`)
+   and runs the secret scan and the registry dry run.
+2. **The plugin's PreToolUse hook** (on Bash and PowerShell) blocks those four commands without
    `--confirm` or `--dry-run`, so Claude has to show you the plan first. `--confirm` only counts in
    the same command; `ship preflight --confirm && ship publish` is still blocked.
 3. **The skill** tells Claude to dry-run, show you the plan, and wait for your yes before each

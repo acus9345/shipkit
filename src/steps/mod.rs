@@ -9,6 +9,8 @@ pub mod commit;
 pub mod create_repo;
 pub mod guard;
 pub mod inspect;
+pub mod install_tool;
+pub mod login;
 pub mod preflight;
 pub mod publish;
 pub mod release;
@@ -41,7 +43,7 @@ pub trait Step {
     fn execute(&self, ctx: &Ctx, plan: Plan) -> Result<Value>;
 
     fn risk() -> Risk {
-        gate::risk_of(Self::NAME).expect("every step is listed in gate::STEPS")
+        gate::risk_of(Self::NAME).expect("every step is listed in gate::STEPS or gate::HELPERS")
     }
 }
 

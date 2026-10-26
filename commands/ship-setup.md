@@ -12,6 +12,8 @@ Set up and check the `ship` publishing CLI for this machine.
    The plugin's safety hook also needs `ship` on PATH.
 2. Run `ship preflight`. It checks git, gh and cargo, the logged-in accounts and the git identity, and starts no logins.
    For each entry in `data.problems` or `data.warnings`, tell the user the exact command to run themselves. Never ask for a token or password.
+   Mention that `ship install-tool <tool>` can install a missing gh, git, node or uv (gated: it needs their OK), and
+   `ship login <tool>` opens the official login in a window for them to finish. Don't run either unless they ask.
 3. Run `ship self-test`. It checks offline that gated steps are refused without `--confirm`, that the hook blocks them,
    that secrets are redacted, and that the secret scan finds planted secrets in a temp folder.
 4. Reply with a short table: tool versions, GitHub account, crates.io login (yes/no), git identity, and self-test result.

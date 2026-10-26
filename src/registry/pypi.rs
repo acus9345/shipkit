@@ -41,6 +41,58 @@ fn venv_bin(venv: &Path, exe: &str) -> PathBuf {
     }
 }
 
+/// Where the local PyPI credential lives, by key names only; values are never read.
+/// uv's own sources come first, since `uv publish` is the default upload.
+fn credential_source() -> Option<&'static str> {
+    let set = |var: &str| std::env::var_os(var).is_some_and(|v| !v.is_empty());
+    if set("UV_PUBLISH_TOKEN") {
+        return Some("env:UV_PUBLISH_TOKEN");
+    }
+    if set("UV_PUBLISH_PASSWORD") {
+        return Some("env:UV_PUBLISH_PASSWORD");
+    }
+    if uv_credentials_file().and_then(|p| std::fs::read_to_string(p).ok()).is_some_and(|t| uv_store_has_pypi(&t)) {
+        return Some("uv auth login");
+    }
+    if set("TWINE_PASSWORD") {
+        return Some("env:TWINE_PASSWORD");
+    }
+    let pypirc = home_dir().map(|h| h.join(".pypirc"));
+    if pypirc
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .is_some_and(|t| crate::registry::crates_io::has_key_in_section(&t, "pypi", "password"))
+    {
+        return Some(".pypirc");
+    }
+    None
+}
+
+fn is_twine_source(src: &str) -> bool {
+    src == "env:TWINE_PASSWORD" || src == ".pypirc"
+}
+
+/// uv's credential store (`uv auth login`).
+fn uv_credentials_file() -> Option<PathBuf> {
+    let data = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| home_dir().map(|h| h.join(".local").join("share")))
+    }?;
+    Some(data.join("uv").join("credentials").join("credentials.toml"))
+}
+
+/// Whether the store has an entry for PyPI's upload endpoint (`service` lines only).
+fn uv_store_has_pypi(toml: &str) -> bool {
+    toml.lines().any(|l| {
+        l.trim_start()
+            .strip_prefix("service")
+            .is_some_and(|r| r.trim_start().starts_with('=') && r.contains("upload.pypi.org"))
+    })
+}
+
 fn read_manifest(dir: &Path) -> Result<String> {
     let path = dir.join("pyproject.toml");
     std::fs::read_to_string(&path).map_err(|e| ShipError::new(Code::NotFound, format!("cannot read {}: {e}", path.display())))
@@ -60,24 +112,16 @@ impl Registry for PyPi {
     }
 
     fn login_status(&self) -> LoginStatus {
-        for var in ["UV_PUBLISH_TOKEN", "TWINE_PASSWORD"] {
-            if std::env::var_os(var).is_some_and(|v| !v.is_empty()) {
-                return LoginStatus { logged_in: true, source: Some(format!("env:{var}")), note: None };
-            }
-        }
-        let pypirc = home_dir().map(|h| h.join(".pypirc"));
-        if let Some(text) = pypirc.and_then(|p| std::fs::read_to_string(p).ok()) {
-            if crate::registry::crates_io::has_key_in_section(&text, "pypi", "password") {
-                return LoginStatus { logged_in: true, source: Some(".pypirc".into()), note: None };
-            }
-        }
-        LoginStatus {
-            logged_in: false,
-            source: None,
-            note: Some(
-                "no local PyPI credential; trusted publishing from CI is recommended and works even before the first release (pending publisher)"
-                    .into(),
-            ),
+        match credential_source() {
+            Some(src) => LoginStatus { logged_in: true, source: Some(src.into()), note: None },
+            None => LoginStatus {
+                logged_in: false,
+                source: None,
+                note: Some(
+                    "no local PyPI credential; `ship login pypi` stores one with `uv auth login`, but trusted publishing from CI is recommended and works even before the first release (pending publisher)"
+                        .into(),
+                ),
+            },
         }
     }
 
@@ -248,10 +292,13 @@ impl Registry for PyPi {
     fn publish_cmds(&self, dir: &Path, version: &str, _allow_dirty: bool) -> Vec<Cmd> {
         let out = out_dir(dir, version);
         let glob = format!("{}/*", out.to_string_lossy().replace('\\', "/"));
-        vec![
-            uv(&["build", "--out-dir", &out.to_string_lossy()], dir),
-            uv(&["publish", "--check-url", "https://pypi.org/simple/", &glob], dir),
-        ]
+        let upload = if credential_source().is_some_and(is_twine_source) {
+            // `uv publish` does not read .pypirc or TWINE_*; twine does.
+            uv(&["tool", "run", "twine", "upload", "--non-interactive", &glob], dir)
+        } else {
+            uv(&["publish", "--check-url", "https://pypi.org/simple/", &glob], dir)
+        };
+        vec![uv(&["build", "--out-dir", &out.to_string_lossy()], dir), upload]
     }
 
     fn is_rate_limited(&self, output: &str) -> bool {
@@ -570,5 +617,14 @@ mod tests {
         assert!(!y.contains("secrets."));
         let repo_only = PyPi.release_workflow(&WorkflowSpec { name: "x".into(), private: false, publish: false, bin: None });
         assert!(!repo_only.contains("gh-action-pypi-publish"));
+    }
+
+    #[test]
+    fn uv_store_entry_for_pypi() {
+        let store = "[[credential]]\nservice = \"https://upload.pypi.org/legacy/\"\nusername = \"__token__\"\n";
+        assert!(uv_store_has_pypi(store));
+        assert!(!uv_store_has_pypi("[[credential]]\nservice = \"https://example.com/simple/\"\n"));
+        assert!(!uv_store_has_pypi("password = \"upload.pypi.org\"\n"));
+        assert!(is_twine_source(".pypirc") && !is_twine_source("uv auth login"));
     }
 }

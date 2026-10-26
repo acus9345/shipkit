@@ -154,14 +154,7 @@ pub fn run(cmd: &Cmd, log: &Logger) -> Result<Output> {
     }
     let mut child = match c.spawn() {
         Ok(ch) => ch,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            log.event("run", json!({"cmd": cmd.display(), "error": "not installed"}));
-            return Err(ShipError::new(
-                Code::ToolMissing,
-                format!("`{}` is not installed or not on PATH", cmd.program),
-            )
-            .with_details(json!({"tool": cmd.program})));
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(missing_tool(cmd, log)),
         Err(e) => return Err(e.into()),
     };
 
@@ -211,6 +204,64 @@ pub fn run(cmd: &Cmd, log: &Logger) -> Result<Output> {
         }),
     );
     Ok(out)
+}
+
+fn missing_tool(cmd: &Cmd, log: &Logger) -> ShipError {
+    log.event("run", json!({"cmd": cmd.display(), "error": "not installed"}));
+    ShipError::new(Code::ToolMissing, format!("`{}` is not installed or not on PATH", cmd.program))
+        .with_details(json!({"tool": cmd.program}))
+}
+
+/// Run an interactive command in its own visible console window, where the
+/// user types into the tool's own prompts (a login), and wait for the window
+/// to close. Nothing is captured, so ship never sees what the user enters.
+/// Returns the exit code, or None if the window was still open at `timeout`.
+pub fn run_in_window(cmd: &Cmd, log: &Logger, timeout: Duration) -> Result<Option<i32>> {
+    if !cfg!(windows) {
+        return Err(ShipError::new(
+            Code::Precondition,
+            format!("ship can only open a login window on Windows; run `{}` yourself in a terminal", cmd.display()),
+        )
+        .with_details(json!({ "cmd": cmd.display() })));
+    }
+    let started = Instant::now();
+    let mut c = Command::new(&cmd.program);
+    c.args(&cmd.args);
+    if let Some(d) = &cmd.cwd {
+        c.current_dir(d);
+    }
+    // The point of the window is the tool's own prompts, so none are disabled.
+    for (k, _) in QUIET_ENV {
+        c.env_remove(k);
+    }
+    for (k, v) in &cmd.env {
+        c.env(k, v);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        c.creation_flags(CREATE_NEW_CONSOLE);
+    }
+    let mut child = match c.spawn() {
+        Ok(ch) => ch,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(missing_tool(cmd, log)),
+        Err(e) => return Err(e.into()),
+    };
+    let deadline = started + timeout;
+    let code = loop {
+        if let Some(s) = child.try_wait()? {
+            break s.code();
+        }
+        if Instant::now() >= deadline {
+            // Left open for the user to finish or close; ship stops waiting.
+            log.event("window", json!({ "cmd": cmd.display(), "still_open": true }));
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    log.event("window", json!({ "cmd": cmd.display(), "exit": code, "ms": started.elapsed().as_millis() as u64 }));
+    Ok(code)
 }
 
 /// Run and require success; on failure return `E_COMMAND_FAILED` with the output tail.
@@ -305,6 +356,17 @@ mod tests {
     fn missing_tool_is_reported() {
         let e = run(&Cmd::new("definitely-not-a-real-tool-xyz", &[]), &Logger::null()).unwrap_err();
         assert_eq!(e.code, Code::ToolMissing);
+    }
+
+    /// Opens a console window briefly, so it only runs on request:
+    /// `cargo test -- --ignored window`.
+    #[test]
+    #[ignore]
+    fn window_reports_exit_code() {
+        let code = run_in_window(&Cmd::new("cmd", &["/c", "exit 3"]), &Logger::null(), Duration::from_secs(30)).unwrap();
+        assert_eq!(code, Some(3));
+        let code = run_in_window(&Cmd::new(&node_tool("npm"), &["--version"]), &Logger::null(), Duration::from_secs(60)).unwrap();
+        assert_eq!(code, Some(0));
     }
 
     #[test]

@@ -194,3 +194,21 @@ fn checks_pass_then_stop_at_first_failure() {
     assert!(v["error"]["details"]["output"].as_str().unwrap().contains("unused"));
     assert_eq!(v["error"]["details"]["passed"].as_array().unwrap().len(), 0);
 }
+
+#[test]
+fn helpers_validate_input_and_install_tool_is_gated() {
+    let sb = Sandbox::new("helpers");
+    for args in [&["login", "docker"][..], &["login"][..], &["install-tool", "python"][..]] {
+        let (code, v) = sb.ship(&sb.root, args);
+        assert_eq!(code, 2, "{args:?}: {v}");
+        assert_eq!(v["error"]["code"], "E_INPUT");
+    }
+    // git is always present here, so the plan is a skip, but the gate still applies.
+    let (code, v) = sb.ship(&sb.root, &["install-tool", "git"]);
+    assert_eq!(code, 3, "{v}");
+    assert_eq!(v["error"]["code"], "E_CONFIRM_REQUIRED");
+    assert!(v["error"]["message"].as_str().unwrap().contains("installs software"));
+    let (code, v) = sb.ship(&sb.root, &["install-tool", "git", "--dry-run"]);
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(v["data"]["plan"]["actions"][0]["kind"], "skip");
+}

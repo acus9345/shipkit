@@ -27,7 +27,9 @@ the dangerous things `ship` refuses to do by going around it.
     "ask": [
       "Bash(ship create-repo *)",
       "Bash(ship release *)",
-      "Bash(ship publish *)"
+      "Bash(ship publish *)",
+      "Bash(ship login *)",
+      "Bash(ship install-tool *)"
     ],
     "deny": [
       "Bash(cargo publish *)",
@@ -55,8 +57,8 @@ the dangerous things `ship` refuses to do by going around it.
 
 How the layers fit together:
 
-- **`ask` on the three gated steps**: Claude Code asks you before each one, even with `--confirm`.
-- **The plugin's PreToolUse hook**: blocks `ship create-repo`, `ship release` and `ship publish` without
+- **`ask` on the three gated steps and the setup helpers**: Claude Code asks you before each one, even with `--confirm`.
+- **The plugin's PreToolUse hook**: blocks `ship create-repo`, `ship release`, `ship publish` and `ship install-tool` without
   `--confirm` (or `--dry-run`), so Claude has to show you the plan first.
 - **`ship` itself**: refuses gated steps without `--confirm`, refuses outward steps on a dirty tree,
   and runs the secret scan and the registry dry run first.

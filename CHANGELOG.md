@@ -6,6 +6,16 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `ship login gh|npm|cargo|pypi`: opens the tool's official login in a visible window and waits for you to finish it there. ship never sees what you enter, and skips tools already logged in.
+- `ship install-tool gh|git|node|uv` (gated): installs a missing tool with winget on Windows or Homebrew on macOS.
+
+### Fixed
+
+- `ship publish` to npm with 2FA: when npm asks for approval, the publish re-runs in a window where you approve it in the browser, instead of failing.
+- PyPI terminal publish now finds a `uv auth login` credential, and uploads with twine when the credential is in `.pypirc` or `TWINE_PASSWORD`, which `uv publish` does not read.
+
 ## [0.2.0] - 2026-10-25
 
 ### Added

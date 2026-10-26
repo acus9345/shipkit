@@ -27,6 +27,7 @@ pub fn run(log: &Logger) -> Result<Value> {
         ("ship create-repo --private", true),
         ("ship preflight --confirm && ship publish", true),
         ("/c/tools/ship.exe release", true),
+        ("ship install-tool uv", true),
         ("ship release --confirm", false),
         ("ship publish --dry-run", false),
         ("ship preflight", false),

@@ -36,15 +36,28 @@ pub const STEPS: &[(&str, Risk)] = &[
     ("publish", Risk::High),
 ];
 
+/// Setup helpers, run only when the user asks: `login` opens the tool's own
+/// login in a window; `install-tool` installs software, so it is gated.
+pub const HELPERS: &[(&str, Risk)] = &[("login", Risk::Medium), ("install-tool", Risk::High)];
+
 /// Commands that are not publishing steps (plugin plumbing). All read-only.
 pub const UTILITIES: &[(&str, Risk)] = &[("hook", Risk::Low), ("self-test", Risk::Low)];
 
 pub fn risk_of(step: &str) -> Option<Risk> {
-    STEPS.iter().chain(UTILITIES).find(|(s, _)| *s == step).map(|(_, r)| *r)
+    STEPS.iter().chain(HELPERS).chain(UTILITIES).find(|(s, _)| *s == step).map(|(_, r)| *r)
 }
 
 pub fn is_gated(step: &str) -> bool {
     risk_of(step) == Some(Risk::High)
+}
+
+/// Why a gated step needs `--confirm`, for refusals and the hook.
+pub fn gate_reason(step: &str) -> &'static str {
+    if step == "install-tool" {
+        "installs software on this machine"
+    } else {
+        "is public or irreversible"
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -130,7 +143,8 @@ pub fn confirm_required(step: &str, plan: &Plan) -> ShipError {
     ShipError::new(
         Code::ConfirmRequired,
         format!(
-            "`{step}` is public or irreversible. Review the plan, then re-run with --confirm (or --dry-run to preview)."
+            "`{step}` {}. Review the plan, then re-run with --confirm (or --dry-run to preview).",
+            gate_reason(step)
         ),
     )
     .with_details(json!({ "plan": plan }))
@@ -188,6 +202,8 @@ mod tests {
         assert_eq!(gated, ["create-repo", "release", "publish"]);
         assert_eq!(STEPS.len(), 15);
         assert!(risk_of("nope").is_none());
+        assert!(is_gated("install-tool"));
+        assert!(!is_gated("login"));
     }
 
     #[test]

@@ -18,7 +18,7 @@ use std::path::PathBuf;
     about = "Take a project from a local folder to a GitHub repo and a registry release, safely.",
     long_about = "Take a project from a local folder to a GitHub repo and a registry release, safely.\n\n\
                   Every command prints one JSON object. Public or irreversible steps \
-                  (create-repo, release, publish) are refused unless --confirm is passed; \
+                  (create-repo, release, publish) and install-tool are refused unless --confirm is passed; \
                   every step accepts --dry-run to print exactly what it would do."
 )]
 pub struct Cli {
@@ -111,6 +111,10 @@ step_commands! {
     Verify(steps::verify::Verify),
     /// [gated] Publish from the terminal; skipped if the version exists; 24 h cooldown after a 429.
     Publish(steps::publish::Publish),
+    /// Open the official login for gh, npm, cargo or pypi in a window; you finish it there.
+    Login(steps::login::Login),
+    /// [gated] Install gh, git, node or uv with winget (Windows) or Homebrew (macOS).
+    InstallTool(steps::install_tool::InstallTool),
 }
 
 /// Use `--input` JSON if given, else the parsed flags. Mixing both is an error
@@ -187,7 +191,7 @@ where
         "start",
         json!({ "dir": ctx.dir, "confirm": cli.confirm, "dry_run": cli.dry_run, "input": cli.input.is_some() }),
     );
-    let risk = gate::risk_of(step).expect("step listed in gate::STEPS");
+    let risk = gate::risk_of(step).expect("step listed in gate::STEPS or gate::HELPERS");
     match dispatch(step_cmd, cli.input.as_deref(), &ctx) {
         Ok(out) => {
             ctx.log.event("ok", json!({ "dry_run": out.dry_run }));

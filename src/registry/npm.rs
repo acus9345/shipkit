@@ -255,12 +255,23 @@ impl Registry for Npm {
     }
 
     fn publish_cmds(&self, dir: &Path, _version: &str, _allow_dirty: bool) -> Vec<Cmd> {
-        vec![npm(&["publish", "--access", "public"], dir)]
+        // auth-type=web makes the registry answer a 2FA challenge with a
+        // browser approval link instead of asking for a typed code.
+        vec![npm(&["publish", "--access", "public", "--auth-type=web"], dir)]
     }
 
     fn is_rate_limited(&self, output: &str) -> bool {
         let o = output.to_ascii_lowercase();
         o.contains("e429") || o.contains(" 429") || o.contains("too many requests") || o.contains("rate limit")
+    }
+
+    fn needs_approval(&self, output: &str) -> bool {
+        // npm only waits for 2FA approval in a terminal; without one it fails with EOTP.
+        output.contains("EOTP") || output.to_ascii_lowercase().contains("one-time pass")
+    }
+
+    fn publish_note(&self) -> Option<&'static str> {
+        Some("if your npm account uses 2FA, the publish re-runs in a window: press Enter there and approve it in the browser")
     }
 
     fn package_url(&self, name: &str, version: &str) -> String {
