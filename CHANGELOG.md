@@ -6,6 +6,8 @@ and this project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-26
+
 ### Added
 
 - `ship login gh|npm|cargo|pypi`: opens the tool's official login in a visible window and waits for you to finish it there. ship never sees what you enter, and skips tools already logged in.
